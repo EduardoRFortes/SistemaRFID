@@ -46,6 +46,7 @@ def receber_rfid():
 
     return jsonify({"diff": "Salvo com sucesso"}), 200
 
+
 @app.route("/dados", methods=["GET"])
 def listar_dados():
     conn = sqlite3.connect(DB_FILE)
