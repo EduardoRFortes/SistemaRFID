@@ -44,7 +44,7 @@ def receber_rfid():
         conn.commit()
     conn.close()
 
-    return jsonify({"mensagem": "Salvo com sucesso"}), 200
+    return jsonify({"diff": "Salvo com sucesso"}), 200
 
 @app.route("/dados", methods=["GET"])
 def listar_dados():
