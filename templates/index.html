@@ -1,65 +1,119 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Painel RFID</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { padding: 20px; }
-    .epc-card { margin-bottom: 1rem; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento RFID</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            color: #333;
+        }
+        #terminal {
+            width: 100%;
+            height: 300px;
+            background-color: black;
+            color: white;
+            padding: 10px;
+            font-family: monospace;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            width: 300px;
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #mensagem-status {
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1 class="mb-4">Leituras RFID</h1>
-    <div id="lista" class="row"></div>
-  </div>
+    <h1>Monitoramento de RFID - Terminal em Tempo Real</h1>
 
-  <script>
-    function carregarDados() {
-      fetch("http://localhost:8000/dados")
-        .then(res => res.json())
-        .then(data => {
-          const lista = document.getElementById("lista");
-          lista.innerHTML = "";
-          data.forEach(item => {
-            const col = document.createElement("div");
-            col.className = "col-md-6";
-            col.innerHTML = `
-              <div class="card epc-card">
-                <div class="card-body">
-                  <h5 class="card-title">${item.nome || "Sem nome definido"}</h5>
-                  <p class="card-text">
-                    <strong>EPC:</strong> ${item.epc}<br>
-                    <strong>Timestamp:</strong> ${item.timestamp}
-                  </p>
-                  <div class="input-group">
-                    <input type="text" class="form-control" placeholder="Novo nome" id="nome-${item.id}">
-                    <button class="btn btn-primary" onclick="atualizarNome(${item.id}, '${item.epc}')">Salvar</button>
-                  </div>
-                </div>
-              </div>
-            `;
-            lista.appendChild(col);
-          });
+    <!-- Formulário para definir nome de EPC -->
+    <h2>Associar Nome ao EPC</h2>
+    <form id="form-definir-nome">
+        <label for="epc">EPC:</label><br>
+        <input type="text" id="epc" name="epc" required><br><br>
+
+        <label for="nome">Nome:</label><br>
+        <input type="text" id="nome" name="nome" required><br><br>
+
+        <button type="submit">Definir Nome</button>
+    </form>
+
+    <p id="mensagem-status" style="color: green;"></p>
+
+    <div id="terminal"></div>
+
+    <!-- Adicionando a biblioteca do Socket.IO -->
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+
+    <script>
+        // Conectando-se ao WebSocket
+        var socket = io.connect('http://' + document.domain + ':' + location.port);
+
+        // Função para atualizar o terminal com os dados recebidos
+        function atualizarTerminal(dado) {
+            const terminal = document.getElementById('terminal');
+            const nome = dado.nome && dado.nome.trim() !== "" ? dado.nome : "Desconhecido";
+            const mensagem = `[${dado.timestamp}] EPC: ${dado.epc} → Nome: ${nome}\n`;
+            terminal.innerHTML += mensagem;
+
+            // Rolando o terminal para mostrar as últimas mensagens
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        // Escutando por dados recebidos via WebSocket
+        socket.on('novos_dados', function(dado) {
+            console.log('Dados recebidos via WebSocket:', dado);
+            atualizarTerminal(dado);
         });
-    }
 
-    function atualizarNome(id, epc) {
-      const novoNome = document.getElementById(`nome-${id}`).value;
-      fetch("http://localhost:8000/atualizar_nome", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ epc: epc, nome: novoNome })
-      })
-      .then(res => res.json())
-      .then(resp => {
-        alert(resp.mensagem);
-        carregarDados();
-      });
-    }
+        // Enviando dados para a rota /definir
+        document.getElementById("form-definir-nome").addEventListener("submit", async function(e) {
+            e.preventDefault();
+            const epc = document.getElementById("epc").value.trim().toUpperCase();
+            const nome = document.getElementById("nome").value.trim();
 
-    carregarDados();
-  </script>
+            const response = await fetch("/definir", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ epc, nome })
+            });
+
+            const result = await response.json();
+            const status = document.getElementById("mensagem-status");
+
+            if (response.ok) {
+                status.textContent = result.mensagem;
+                status.style.color = "green";
+                document.getElementById("form-definir-nome").reset();
+            } else {
+                status.textContent = result.erro || "Erro ao definir nome";
+                status.style.color = "red";
+            }
+        });
+    </script>
 </body>
 </html>

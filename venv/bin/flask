@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/home/eduardofortes/Desktop/PERVAUTO/Servidor Tags RFID/venv/bin/python3" "$0" "$@"
-' '''
+#!/home/eduardofortes/Desktop/PERVAUTO/SistemaRFID/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

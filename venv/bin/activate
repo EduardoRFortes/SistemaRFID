@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV='/home/eduardofortes/Desktop/PERVAUTO/Servidor Tags RFID/venv'
+VIRTUAL_ENV=/home/eduardofortes/Desktop/PERVAUTO/SistemaRFID/venv
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

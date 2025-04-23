@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV '/home/eduardofortes/Desktop/PERVAUTO/Servidor Tags RFID/venv'
+set -gx VIRTUAL_ENV /home/eduardofortes/Desktop/PERVAUTO/SistemaRFID/venv
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH
