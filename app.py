@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, g
+from flask import Flask, request, jsonify, render_template, g, redirect, url_for, session
 from flask_cors import CORS
 from flask_socketio import SocketIO
 import sqlite3
@@ -8,21 +8,19 @@ from threading import Thread
 import paho.mqtt.client as mqtt
 import json
 
-# Flask setup
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Habilita CORS para WebSocket
+app.secret_key = 'segredo_super_secreto'  # importante para sessões
+socketio = SocketIO(app, cors_allowed_origins="*")
+CORS(app)
 
-# Configurações
 DB_FILE = "banco.db"
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 MQTT_TOPIC = "/rfid/leituras"
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("APP")
 
-# Banco de dados por request
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_FILE)
@@ -31,7 +29,7 @@ def get_db():
 @app.teardown_appcontext
 def close_db(exception):
     db = g.pop("db", None)
-    if db is not None:
+    if db:
         db.close()
 
 def init_db():
@@ -46,16 +44,52 @@ def init_db():
                 nome TEXT
             );
         """)
+        cursor.execute("""
+            CREATE TABLE usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            );
+        """)
         conn.commit()
         conn.close()
         logger.info("Banco de dados criado com sucesso.")
 
-# Rota principal
+# Middleware de login
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "usuario" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT * FROM usuarios WHERE username=? AND password=?", (username, password))
+        user = cursor.fetchone()
+        if user:
+            session["usuario"] = username
+            return redirect(url_for("homepage"))
+        return render_template("login.html", erro="Usuário ou senha inválidos")
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    session.pop("usuario", None)
+    return redirect(url_for("login"))
+
 @app.route("/")
+@login_required
 def homepage():
     return render_template("index.html")
 
-# Rota de recebimento HTTP
 @app.route("/rfid", methods=["POST"])
 def receber_rfid():
     data = request.get_json()
@@ -73,16 +107,15 @@ def receber_rfid():
     if tag is None:
         cursor.execute("INSERT INTO leituras (epc, timestamp) VALUES (?, ?)", (epc, timestamp))
         db.commit()
-        logger.info(f"EPC inserido via HTTP: {epc}")
         nome = None
+        logger.info(f"EPC inserido via HTTP: {epc}")
     else:
-        logger.info(f"EPC já registrado via HTTP: {epc}")
         nome = tag[3]
+        logger.info(f"EPC já registrado via HTTP: {epc}")
 
     socketio.emit('novos_dados', {'nome': nome, 'epc': epc, 'timestamp': timestamp})
     return jsonify({"mensagem": "Salvo com sucesso"}), 200
 
-# Rota de associação de nome
 @app.route("/definir", methods=["POST"])
 def definir_nome():
     data = request.get_json()
@@ -107,7 +140,6 @@ def definir_nome():
     db.commit()
     return jsonify({"mensagem": f"Nome definido para {epc}: {nome}"}), 200
 
-# Rota para exibir dados
 @app.route("/dados", methods=["GET"])
 def listar_dados():
     ordem = request.args.get("ordem", "desc").lower()
@@ -131,12 +163,10 @@ def listar_dados():
     dados = [{"id": row[0], "epc": row[1], "timestamp": row[2], "nome": row[3]} for row in rows]
     return jsonify(dados)
 
-# WebSocket
 @socketio.on('connect')
 def on_connect():
     logger.info("Cliente conectado via WebSocket.")
 
-# --- MQTT integrado ao app.py ---
 def iniciar_mqtt():
     def on_connect(client, userdata, flags, rc):
         logger.info(f"Conectado ao broker MQTT com código {rc}")
@@ -149,7 +179,6 @@ def iniciar_mqtt():
             timestamp = payload.get("timestamp", "").strip()
 
             if epc and timestamp:
-                # Emitir para frontend
                 db = sqlite3.connect(DB_FILE)
                 cursor = db.cursor()
 
@@ -179,8 +208,7 @@ def iniciar_mqtt():
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     client.loop_forever()
 
-# Inicialização
 if __name__ == "__main__":
     init_db()
-    Thread(target=iniciar_mqtt).start()  # Roda o MQTT em paralelo
+    Thread(target=iniciar_mqtt).start()
     socketio.run(app, host="0.0.0.0", port=8000, debug=True)
