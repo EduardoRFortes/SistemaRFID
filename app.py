@@ -4,9 +4,11 @@ from flask_socketio import SocketIO
 import sqlite3
 import os
 import logging
-from threading import Thread
+from threading import Thread, Lock # Adicionado Lock
 import paho.mqtt.client as mqtt
 import json
+import csv # Importado o módulo csv
+from datetime import datetime # Importado para timestamp na inserção
 
 app = Flask(__name__)
 app.secret_key = 'segredo_super_secreto'  # importante para sessões
@@ -17,6 +19,8 @@ DB_FILE = "banco.db"
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 MQTT_TOPIC = "/rfid/leituras"
+LOG_CSV_FILE = "leituras_rfid_log.csv" # Nome do arquivo CSV para log
+csv_file_lock = Lock() # Lock para garantir escrita segura em arquivo CSV
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("APP")
@@ -54,6 +58,24 @@ def init_db():
         conn.commit()
         conn.close()
         logger.info("Banco de dados criado com sucesso.")
+
+# Função para escrever no arquivo CSV
+def write_to_csv(data):
+    """
+    Escreve um dicionário de dados em uma nova linha no arquivo CSV.
+    Cria o cabeçalho se o arquivo não existir.
+    """
+    with csv_file_lock: # Garante que apenas uma thread escreva por vez
+        file_exists = os.path.exists(LOG_CSV_FILE)
+        with open(LOG_CSV_FILE, 'a', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['timestamp', 'epc', 'nome', 'mqttId']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            if not file_exists:
+                writer.writeheader() # Escreve o cabeçalho apenas se o arquivo for novo
+
+            writer.writerow(data)
+            logger.info(f"Dados registrados em CSV: {data}")
 
 # Middleware de login
 def login_required(f):
@@ -93,11 +115,13 @@ def homepage():
 @app.route("/rfid", methods=["POST"])
 def receber_rfid():
     data = request.get_json()
-    if not data or "epc" not in data or "timestamp" not in data:
-        return jsonify({"erro": "JSON inválido"}), 400
+    # Adicionado "mqttId" na validação
+    if not data or "epc" not in data or "timestamp" not in data or "mqttId" not in data:
+        return jsonify({"erro": "JSON inválido ou incompleto"}), 400
 
     epc = data["epc"].strip().upper()
     timestamp = data["timestamp"].strip()
+    mqttId = data["mqttId"].strip() # Este valor vem do JSON HTTP
 
     db = get_db()
     cursor = db.cursor()
@@ -113,7 +137,16 @@ def receber_rfid():
         nome = tag[3]
         logger.info(f"EPC já registrado via HTTP: {epc}")
 
-    socketio.emit('novos_dados', {'nome': nome, 'epc': epc, 'timestamp': timestamp})
+    # Prepara os dados para o log CSV
+    log_data = {
+        'timestamp': timestamp,
+        'epc': epc,
+        'nome': nome if nome else "Desconhecido", # Garante que 'nome' não seja None para o CSV
+        'mqttId': mqttId
+    }
+    write_to_csv(log_data) # Chama a função para escrever no CSV
+
+    socketio.emit('novos_dados', {'nome': nome, 'epc': epc, 'timestamp': timestamp, 'mqttId': mqttId})
     return jsonify({"mensagem": "Salvo com sucesso"}), 200
 
 @app.route("/definir", methods=["POST"])
@@ -133,7 +166,6 @@ def definir_nome():
     if resultado:
         cursor.execute("UPDATE leituras SET nome = ? WHERE epc = ?", (nome, epc))
     else:
-        from datetime import datetime
         agora = datetime.now().isoformat()
         cursor.execute("INSERT INTO leituras (epc, nome, timestamp) VALUES (?, ?, ?)", (epc, nome, agora))
 
@@ -177,8 +209,10 @@ def iniciar_mqtt():
             payload = json.loads(msg.payload.decode())
             epc = payload.get("epc", "").strip().upper()
             timestamp = payload.get("timestamp", "").strip()
+            mqttId = payload.get("mqttId", "").strip() # Obtém o mqttId do payload MQTT
 
-            if epc and timestamp:
+            # Incluído mqttId na validação aqui também
+            if epc and timestamp and mqttId:
                 db = sqlite3.connect(DB_FILE)
                 cursor = db.cursor()
 
@@ -196,9 +230,19 @@ def iniciar_mqtt():
                 
                 db.close()
 
-                socketio.emit("novos_dados", {"epc": epc, "timestamp": timestamp, "nome": nome})
+                # Prepara os dados para o log CSV
+                log_data = {
+                    'timestamp': timestamp,
+                    'epc': epc,
+                    'nome': nome if nome else "Desconhecido", # Garante que 'nome' não seja None para o CSV
+                    'mqttId': mqttId
+                }
+                write_to_csv(log_data) # Chama a função para escrever no CSV
+
+                # CORREÇÃO: Usar 'mqttId' consistente com o front-end
+                socketio.emit("novos_dados", {"epc": epc, "timestamp": timestamp, "nome": nome, "mqttId": mqttId})
             else:
-                logger.warning("MQTT: JSON incompleto")
+                logger.warning(f"MQTT: JSON incompleto ou faltando mqttId. Payload: {payload}")
         except Exception as e:
             logger.error(f"Erro ao processar mensagem MQTT: {e}")
 

@@ -77,7 +77,7 @@
         function atualizarTerminal(dado) {
             const terminal = document.getElementById('terminal');
             const nome = dado.nome && dado.nome.trim() !== "" ? dado.nome : "Desconhecido";
-            const mensagem = `[${dado.timestamp}] EPC: ${dado.epc} → Nome: ${nome}\n`;
+            const mensagem = `[${dado.timestamp}] EPC: ${dado.epc} → Nome: ${nome} → IdMQTT: ${dado.mqttId}\n`;
             terminal.innerHTML += mensagem;
 
             // Rolando o terminal para mostrar as últimas mensagens
